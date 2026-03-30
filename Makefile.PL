@@ -2,7 +2,7 @@ use strict;
 use warnings;
 use ExtUtils::MakeMaker;
 
-my $repo = 'graphviz-perl/GraphViz2-DBI';
+my $repo = $ENV{GRAPHVIZ2_DBI_REPO} || 'neo1ite/GraphViz2-DBI';
 WriteMakefile(
   AUTHOR => 'Ron Savage (ron@savage.net.au)',
   ABSTRACT => "Use GraphViz2 to visualize a database schema",

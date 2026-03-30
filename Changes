@@ -1,3 +1,8 @@
+2.53 2026-03-30
+- add create_inheritance() for PostgreSQL INHERITS (pg_inherits) and inheritance_graph accessor
+- add t/inheritance.t (mock DBI for Pg)
+- document new API in POD
+
 2.52 2020-11-05
 - update tests for GraphViz2 2.60
 

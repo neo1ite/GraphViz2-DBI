@@ -1,40 +1,42 @@
 # NAME
 
-[GraphViz2::DBI](https://metacpan.org/pod/GraphViz2::DBI) - Visualize a database schema as a graph
+[GraphViz2::DBI](https://metacpan.org/pod/GraphViz2%3A%3ADBI) - Visualize a database schema as a graph
 
 # Synopsis
 
-        use DBI;
-        use GraphViz2;
-        use GraphViz2::DBI;
+```perl
+    use DBI;
+    use GraphViz2;
+    use GraphViz2::DBI;
 
-        exit 0 if (! $ENV{DBI_DSN});
+    exit 0 if (! $ENV{DBI_DSN});
 
-        my($graph) = GraphViz2->new (
-                edge   => {color => 'grey'},
-                global => {directed => 1},
-                graph  => {rankdir => 'TB'},
-                node   => {color => 'blue', shape => 'oval'},
-        );
-        my($attr)              = {};
-        $$attr{sqlite_unicode} = 1 if ($ENV{DBI_DSN} =~ /SQLite/i);
-        my($dbh)               = DBI->connect($ENV{DBI_DSN}, $ENV{DBI_USER}, $ENV{DBI_PASS}, $attr);
+    my($graph) = GraphViz2->new (
+            edge   => {color => 'grey'},
+            global => {directed => 1},
+            graph  => {rankdir => 'TB'},
+            node   => {color => 'blue', shape => 'oval'},
+    );
+    my($attr)              = {};
+    $$attr{sqlite_unicode} = 1 if ($ENV{DBI_DSN} =~ /SQLite/i);
+    my($dbh)               = DBI->connect($ENV{DBI_DSN}, $ENV{DBI_USER}, $ENV{DBI_PASS}, $attr);
 
-        $dbh->do('PRAGMA foreign_keys = ON') if ($ENV{DBI_DSN} =~ /SQLite/i);
+    $dbh->do('PRAGMA foreign_keys = ON') if ($ENV{DBI_DSN} =~ /SQLite/i);
 
-        my($g) = GraphViz2::DBI->new(dbh => $dbh, graph => $graph);
+    my($g) = GraphViz2::DBI->new(dbh => $dbh, graph => $graph);
 
-        $g->create;
+    $g->create;
 
-        my($format)      = shift || 'svg';
-        my($output_file) = shift || File::Spec->catfile('html', "dbi.schema.$format");
+    my($format)      = shift || 'svg';
+    my($output_file) = shift || File::Spec->catfile('html', "dbi.schema.$format");
 
-        $graph->run(format => $format, output_file => $output_file);
+    $graph->run(format => $format, output_file => $output_file);
+```
 
 See scripts/dbi.schema.pl (["Scripts Shipped with this Module" in GraphViz2](https://metacpan.org/pod/GraphViz2#Scripts-Shipped-with-this-Module)).
 
 The image html/dbi.schema.svg was generated from the database tables of my module
-[App::Office::Contacts](https://metacpan.org/pod/App::Office::Contacts).
+[App::Office::Contacts](https://metacpan.org/pod/App%3A%3AOffice%3A%3AContacts).
 
 # Description
 
@@ -48,19 +50,19 @@ Here is the list of [output formats](http://www.graphviz.org/content/output-form
 
 ## Calling new()
 
-`new()` is called as `my($obj) = GraphViz2::DBI->new(k1 => v1, k2 => v2, ...)`.
+`new()` is called as ` my($obj) = GraphViz2::DBI->new(k1 => v1, k2 => v2, ...) `.
 
 It returns a new object of type `GraphViz2::DBI`.
 
 Key-value pairs accepted in the parameter list:
 
-- o dbh => $dbh
+- `dbh => $dbh`
 
     This options specifies the database handle to use.
 
     This key is mandatory.
 
-- o graph => $graphviz\_object
+- `graph => $graphviz_object`
 
     This option specifies the GraphViz2 object to use. This allows you to configure it as desired.
 
@@ -71,7 +73,7 @@ Key-value pairs accepted in the parameter list:
 
 # Methods
 
-## create(exclude => \[\], include => \[\])
+## `create(exclude => [], include => [])`
 
 Creates the graph, which is accessible via the graph() method, or via the graph object you passed to
 new().
@@ -80,22 +82,52 @@ Returns $self to allow method chaining.
 
 Parameters:
 
-- o exclude
+- `exclude`
 
     An optional arrayref of table names to exclude.
 
     If none are listed for exclusion, _all_ tables are included.
 
-- o include
+- `include`
 
     An optional arrayref of table names to include.
 
     If none are listed for inclusion, _all_ tables are included.
 
-## graph()
+## `graph()`
 
 Returns the graph object, either the one supplied to new() or the one created during the call to
 new().
+
+## `create_inheritance(%options)`
+
+Builds a _second_ diagram: PostgreSQL table inheritance (`INHERITS`), using the catalog view
+`pg_inherits`. It does not replace the foreign-key graph from `create()`; use the object
+["inheritance\_graph"](#inheritance_graph) to render or export this graph.
+
+Requires a [DBI](https://metacpan.org/pod/DBI) handle whose driver is `Pg`. Otherwise it throws an exception.
+
+Returns `$self` for method chaining.
+
+Parameters:
+
+- `schemas => [ 'crm', 'gms', ... ]`
+
+    Optional arrayref of schema names. If present, an inheritance edge is drawn only if the parent
+    table's schema or the child table's schema is in this list.
+
+- `graph => $graphviz2`
+
+    Optional [GraphViz2](https://metacpan.org/pod/GraphViz2) instance. If omitted, a new graph is built with rank direction left-to-right,
+    dashed green edges, and boxed nodes (distinct from the default `graph()` styling).
+
+Output (SVG, PNG, etc.) is produced by calling `$obj->inheritance_graph->run(...)` the same
+way as for the main schema graph; see [GraphViz2](https://metacpan.org/pod/GraphViz2).
+
+## `inheritance_graph()`
+
+Returns the [GraphViz2](https://metacpan.org/pod/GraphViz2) object last populated by ["create\_inheritance"](#create_inheritance), or undef if that method
+has not been called successfully.
 
 # FAQ
 
@@ -106,32 +138,37 @@ foreign table/key pair point to.
 
 The steps are listed here, in the order they are tested. The first match stops the search.
 
-- o Ask the database for foreign key information
+- Ask the database for foreign key information
 
-    [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx::Admin::TableInfo) is used for this.
+    [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo) is used for this.
 
-- o Take a guess
+- Take a guess
 
     Assume the foreign key points to a table with a column called `id`, and use that as the primary
     key.
 
-- o Die with a detailed error message
+- Die with a detailed error message
 
 ## Which versions of the servers did you test?
 
-See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx::Admin::TableInfo#FAQ).
+See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo#FAQ).
 
 ## Does GraphViz2::DBI work with SQLite databases?
 
-Yes. See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx::Admin::TableInfo#FAQ).
+Yes. See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo#FAQ).
 
 ## What is returned by SQLite's "pragma foreign\_key\_list($table\_name)"?
 
-See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx::Admin::TableInfo#FAQ).
+See ["FAQ" in DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo#FAQ).
 
 ## How does GraphViz2::DBI draw edges from foreign keys to primary keys?
 
-It uses [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx::Admin::TableInfo).
+It uses [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo).
+
+## How is table inheritance drawn?
+
+["create\_inheritance"](#create_inheritance) queries `pg_inherits` (PostgreSQL only) and adds edges labeled
+`inherits` from parent table to child table. Node names are `schema.table`.
 
 # Scripts Shipped with this Module
 
@@ -170,7 +207,9 @@ Home page: [http://savage.net.au/index.html](http://savage.net.au/index.html).
 
 Australian copyright (c) 2011, Ron Savage.
 
-        All Programs of mine are 'OSI Certified Open Source Software';
-        you can redistribute them and/or modify them under the terms of
-        The Perl License, a copy of which is available at:
-        http://dev.perl.org/licenses/
+```
+    All Programs of mine are 'OSI Certified Open Source Software';
+    you can redistribute them and/or modify them under the terms of
+    The Perl License, a copy of which is available at:
+    http://dev.perl.org/licenses/
+```

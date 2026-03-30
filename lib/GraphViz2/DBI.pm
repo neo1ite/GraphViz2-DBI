@@ -4,8 +4,9 @@ use strict;
 use warnings;
 use warnings  qw(FATAL utf8); # Fatalize encoding glitches.
 
-our $VERSION = '2.52';
+our $VERSION = '2.53';
 
+use Carp qw(croak);
 use DBIx::Admin::TableInfo;
 use GraphViz2;
 use Moo;
@@ -28,6 +29,21 @@ has graph => (
 	#isa     => 'GraphViz2',
 	required => 0,
 );
+
+has inheritance_graph => (
+	is        => 'rw',
+	predicate => 'has_inheritance_graph',
+);
+
+sub _new_inheritance_graph {
+	my ($class) = @_;
+	return GraphViz2->new(
+		edge   => {color => 'darkgreen', style => 'dashed'},
+		global => {directed => 1},
+		graph  => {rankdir => 'LR'},
+		node   => {color => 'darkblue', shape => 'box'},
+	);
+}
 
 sub create {
 	my ($self, %arg) = @_;
@@ -90,6 +106,61 @@ sub create {
 	return $self;
 }
 
+sub create_inheritance {
+	my ($self, %arg) = @_;
+	my $dbh = $self->dbh;
+	croak 'create_inheritance requires PostgreSQL (DBI driver must be Pg)'
+		if ( $dbh->{Driver}{Name} || '' ) ne 'Pg';
+
+	my $g = $arg{graph} || __PACKAGE__->_new_inheritance_graph;
+	$self->inheritance_graph($g);
+
+	my $schemas = $arg{schemas};
+	my %schema_ok = ( defined $schemas && ref $schemas eq 'ARRAY' && @$schemas )
+		? map { ( $_ => 1 ) } @$schemas
+		: ();
+
+	my $sql = q{
+		SELECT
+			nsp_p.nspname AS parent_nsp,
+			cls_p.relname AS parent_tbl,
+			nsp_c.nspname AS child_nsp,
+			cls_c.relname AS child_tbl
+		FROM pg_inherits
+		JOIN pg_class cls_p ON cls_p.oid = inhparent
+		JOIN pg_class cls_c ON cls_c.oid = inhrelid
+		JOIN pg_namespace nsp_p ON nsp_p.oid = cls_p.relnamespace
+		JOIN pg_namespace nsp_c ON nsp_c.oid = cls_c.relnamespace
+		WHERE cls_p.relkind = 'r' AND cls_c.relkind = 'r'
+		ORDER BY 1, 2, 3, 4
+	};
+
+	my $sth = $dbh->prepare($sql) or croak $dbh->errstr;
+	$sth->execute() or croak $sth->errstr;
+
+	my %seen_node;
+	while ( my $r = $sth->fetchrow_hashref ) {
+		if (%schema_ok) {
+			next
+				unless $schema_ok{ $r->{parent_nsp} }
+				|| $schema_ok{ $r->{child_nsp} };
+		}
+		my $parent = qq{$r->{parent_nsp}.$r->{parent_tbl}};
+		my $child  = qq{$r->{child_nsp}.$r->{child_tbl}};
+		for my $n ( $parent, $child ) {
+			next if $seen_node{$n}++;
+			$g->add_node( name => $n, label => $n );
+		}
+		$g->add_edge(
+			from  => $parent,
+			to    => $child,
+			label => 'inherits',
+		);
+	}
+	$sth->finish;
+	return $self;
+}
+
 1;
 
 =pod
@@ -144,7 +215,7 @@ Here is the list of L<output formats|http://www.graphviz.org/content/output-form
 
 =head2 Calling new()
 
-C<new()> is called as C<< my($obj) = GraphViz2::DBI->new(k1 => v1, k2 => v2, ...) >>.
+C<new()> is called as C< my($obj) = GraphViz2::DBI-E<gt>new(k1 =E<gt> v1, k2 =E<gt> v2, ...) >.
 
 It returns a new object of type C<GraphViz2::DBI>.
 
@@ -152,13 +223,13 @@ Key-value pairs accepted in the parameter list:
 
 =over 4
 
-=item o dbh => $dbh
+=item C<dbh =E<gt> $dbh>
 
 This options specifies the database handle to use.
 
 This key is mandatory.
 
-=item o graph => $graphviz_object
+=item C<graph =E<gt> $graphviz_object>
 
 This option specifies the GraphViz2 object to use. This allows you to configure it as desired.
 
@@ -171,7 +242,7 @@ This key is optional.
 
 =head1 Methods
 
-=head2 create(exclude => [], include => [])
+=head2 C<create(exclude =E<gt> [], include =E<gt> [])>
 
 Creates the graph, which is accessible via the graph() method, or via the graph object you passed to
 new().
@@ -182,13 +253,13 @@ Parameters:
 
 =over 4
 
-=item o exclude
+=item C<exclude>
 
 An optional arrayref of table names to exclude.
 
 If none are listed for exclusion, I<all> tables are included.
 
-=item o include
+=item C<include>
 
 An optional arrayref of table names to include.
 
@@ -196,10 +267,44 @@ If none are listed for inclusion, I<all> tables are included.
 
 =back
 
-=head2 graph()
+=head2 C<graph()>
 
 Returns the graph object, either the one supplied to new() or the one created during the call to
 new().
+
+=head2 C<create_inheritance(%options)>
+
+Builds a I<second> diagram: PostgreSQL table inheritance (C<INHERITS>), using the catalog view
+C<pg_inherits>. It does not replace the foreign-key graph from C<create()>; use the object
+L</inheritance_graph> to render or export this graph.
+
+Requires a L<DBI> handle whose driver is C<Pg>. Otherwise it throws an exception.
+
+Returns C<$self> for method chaining.
+
+Parameters:
+
+=over 4
+
+=item C<schemas =E<gt> [ 'crm', 'gms', ... ]>
+
+Optional arrayref of schema names. If present, an inheritance edge is drawn only if the parent
+table's schema or the child table's schema is in this list.
+
+=item C<graph =E<gt> $graphviz2>
+
+Optional L<GraphViz2> instance. If omitted, a new graph is built with rank direction left-to-right,
+dashed green edges, and boxed nodes (distinct from the default C<graph()> styling).
+
+=back
+
+Output (SVG, PNG, etc.) is produced by calling C<< $obj->inheritance_graph->run(...) >> the same
+way as for the main schema graph; see L<GraphViz2>.
+
+=head2 C<inheritance_graph()>
+
+Returns the L<GraphViz2> object last populated by L</create_inheritance>, or undef if that method
+has not been called successfully.
 
 =head1 FAQ
 
@@ -212,16 +317,16 @@ The steps are listed here, in the order they are tested. The first match stops t
 
 =over 4
 
-=item o Ask the database for foreign key information
+=item Ask the database for foreign key information
 
 L<DBIx::Admin::TableInfo> is used for this.
 
-=item o Take a guess
+=item Take a guess
 
 Assume the foreign key points to a table with a column called C<id>, and use that as the primary
 key.
 
-=item o Die with a detailed error message
+=item Die with a detailed error message
 
 =back
 
@@ -240,6 +345,11 @@ See L<DBIx::Admin::TableInfo/FAQ>.
 =head2 How does GraphViz2::DBI draw edges from foreign keys to primary keys?
 
 It uses L<DBIx::Admin::TableInfo>.
+
+=head2 How is table inheritance drawn?
+
+L</create_inheritance> queries C<pg_inherits> (PostgreSQL only) and adds edges labeled
+C<inherits> from parent table to child table. Node names are C<schema.table>.
 
 =head1 Scripts Shipped with this Module
 
