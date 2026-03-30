@@ -39,6 +39,12 @@ jobs:
         with:
           perl-version: ${{ matrix.perl }}
 
+      # GraphViz2 (Perl) shells out to AT&T Graphviz; tests fail without `dot` in PATH.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
       - name: Install dependencies
         run: cpanm --with-develop --installdeps .
 

@@ -595,16 +595,12 @@ sub create_inheritance {
 
 L<GraphViz2::DBI> - Visualize a database schema as a graph
 
-=begin html
-
 [![MetaCPAN package](https://repology.org/badge/version-for-repo/metacpan/perl%3Agraphviz2-dbi.svg)](https://repology.org/project/perl%3Agraphviz2-dbi/versions)
 [![CPAN version](https://badge.fury.io/pl/GraphViz2-DBI.svg)](https://metacpan.org/pod/GraphViz2::DBI)
 [![CPAN testers](https://cpants.cpanauthors.org/dist/GraphViz2-DBI.svg)](https://cpants.cpanauthors.org/dist/GraphViz2-DBI)
 [![License](https://img.shields.io/badge/license-Perl%205-blue.svg)](https://dev.perl.org/licenses/)
 [![Perl](https://img.shields.io/badge/perl-5.10%2B-blue.svg)](https://www.perl.org/)
 [![CI](https://github.com/neo1ite/GraphViz2-DBI/actions/workflows/ci.yml/badge.svg)](https://github.com/neo1ite/GraphViz2-DBI/actions/workflows/ci.yml)
-
-=end html
 
 =head1 VERSION
 
