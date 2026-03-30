@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use warnings  qw(FATAL utf8); # Fatalize encoding glitches.
 
-our $VERSION = '2.55';
+our $VERSION = '2.56';
 
 # Localized in create() when debug is true so _trace runs without GRAPHVIZ2_DBI_DEBUG.
 our $_trace_for_create;
@@ -595,9 +595,20 @@ sub create_inheritance {
 
 L<GraphViz2::DBI> - Visualize a database schema as a graph
 
+=begin html
+
+[![MetaCPAN package](https://repology.org/badge/version-for-repo/metacpan/perl%3Agraphviz2-dbi.svg)](https://repology.org/project/perl%3Agraphviz2-dbi/versions)
+[![CPAN version](https://badge.fury.io/pl/GraphViz2-DBI.svg)](https://metacpan.org/pod/GraphViz2::DBI)
+[![CPAN testers](https://cpants.cpanauthors.org/dist/GraphViz2-DBI.svg)](https://cpants.cpanauthors.org/dist/GraphViz2-DBI)
+[![License](https://img.shields.io/badge/license-Perl%205-blue.svg)](https://dev.perl.org/licenses/)
+[![Perl](https://img.shields.io/badge/perl-5.10%2B-blue.svg)](https://www.perl.org/)
+[![CI](https://github.com/neo1ite/GraphViz2-DBI/actions/workflows/ci.yml/badge.svg)](https://github.com/neo1ite/GraphViz2-DBI/actions/workflows/ci.yml)
+
+=end html
+
 =head1 VERSION
 
-This document describes version 2.55 of L<GraphViz2::DBI>. The canonical version is the value of
+This document describes version 2.56 of L<GraphViz2::DBI>. The canonical version is the value of
 C<$GraphViz2::DBI::VERSION> in F<lib/GraphViz2/DBI.pm> and the F<Changes> file shipped with this
 distribution.
 

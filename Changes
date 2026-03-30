@@ -1,3 +1,7 @@
+2.56 NOT YET RELEASED
+- GitHub Actions: CI workflow (perl 5.26–5.42, make test; author tests on 5.42), same layout as Modern-Perl-Prelude
+- README shields (Repology MetaCPAN, CPAN version, CPAN testers, license, perl 5.10+, CI) in POD (=begin html); README.md matches pod2github output
+
 2.55 2026-03-31
 - PostgreSQL FK graph: merge DBIx::Admin::TableInfo per schema when DBI_SCHEMA is set (TableInfo
   alone only queries public); qualified schema.table node names and FK endpoints
