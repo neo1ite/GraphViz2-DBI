@@ -15,4 +15,5 @@ nytprof.out
 *.o
 *.bs
 /_eumm/
-/GraphViz2-*
+/GraphViz2-DBI-*
+/html
