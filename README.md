@@ -94,6 +94,18 @@ Parameters:
 
     If none are listed for inclusion, _all_ tables are included.
 
+- `debug`
+
+    If true, or if the environment variable `GRAPHVIZ2_DBI_DEBUG` is set, diagnostics are printed to
+    `STDERR`: how many tables [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo) returned, current `search_path` on
+    PostgreSQL, and table names. Use this when the generated graph is empty or too small.
+
+Environment:
+
+- `GRAPHVIZ2_DBI_DEBUG`
+
+    When set to a true value, same as `create(debug => 1)`.
+
 ## `graph()`
 
 Returns the graph object, either the one supplied to new() or the one created during the call to
@@ -169,6 +181,14 @@ It uses [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3AT
 
 ["create\_inheritance"](#create_inheritance) queries `pg_inherits` (PostgreSQL only) and adds edges labeled
 `inherits` from parent table to child table. Node names are `schema.table`.
+
+## Why is the schema graph empty or almost empty?
+
+For PostgreSQL, [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo) defaults to schema `public` only (it does not follow
+`search_path`). Set `DBI_SCHEMA` to a comma-separated list of schemas (see
+`scripts/dbi.schema.pl`): `GraphViz2::DBI` merges metadata per schema and uses qualified
+table names (`schema.table`). Set `GRAPHVIZ2_DBI_DEBUG` to print table counts and
+`search_path`.
 
 # Scripts Shipped with this Module
 

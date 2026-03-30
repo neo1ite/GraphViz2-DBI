@@ -35,7 +35,7 @@ WriteMakefile(
       develop => {
         requires => {
           'Test::Pod' => 1.48,
-          'Pod::Markdown' => 0,
+          'Pod::Markdown::Github' => 0,
         },
       },
     },
@@ -48,6 +48,6 @@ sub MY::postamble {
 pure_all :: README.md
 
 README.md : \$(VERSION_FROM)
-\tpod2markdown \$< >\$\@
+\tpod2github \$< \$@
 EOF
 }
