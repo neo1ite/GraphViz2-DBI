@@ -2,6 +2,12 @@
 
 [GraphViz2::DBI](https://metacpan.org/pod/GraphViz2%3A%3ADBI) - Visualize a database schema as a graph
 
+# VERSION
+
+This document describes version 2.55 of [GraphViz2::DBI](https://metacpan.org/pod/GraphViz2%3A%3ADBI). The canonical version is the value of
+`$GraphViz2::DBI::VERSION` in `lib/GraphViz2/DBI.pm` and the `Changes` file shipped with this
+distribution.
+
 # Synopsis
 
 ```perl
@@ -11,26 +17,22 @@
 
     exit 0 if (! $ENV{DBI_DSN});
 
-    my($graph) = GraphViz2->new (
-            edge   => {color => 'grey'},
-            global => {directed => 1},
-            graph  => {rankdir => 'TB'},
-            node   => {color => 'blue', shape => 'oval'},
-    );
     my($attr)              = {};
     $$attr{sqlite_unicode} = 1 if ($ENV{DBI_DSN} =~ /SQLite/i);
     my($dbh)               = DBI->connect($ENV{DBI_DSN}, $ENV{DBI_USER}, $ENV{DBI_PASS}, $attr);
 
     $dbh->do('PRAGMA foreign_keys = ON') if ($ENV{DBI_DSN} =~ /SQLite/i);
 
-    my($g) = GraphViz2::DBI->new(dbh => $dbh, graph => $graph);
+    # Uses the module default GraphViz2 theme (light background, Mrecord nodes, splines).
+    # Pass graph => GraphViz2->new(...) to customize.
+    my($g) = GraphViz2::DBI->new(dbh => $dbh);
 
     $g->create;
 
     my($format)      = shift || 'svg';
     my($output_file) = shift || File::Spec->catfile('html', "dbi.schema.$format");
 
-    $graph->run(format => $format, output_file => $output_file);
+    $g->graph->run(format => $format, output_file => $output_file);
 ```
 
 See scripts/dbi.schema.pl (["Scripts Shipped with this Module" in GraphViz2](https://metacpan.org/pod/GraphViz2#Scripts-Shipped-with-this-Module)).
@@ -66,8 +68,8 @@ Key-value pairs accepted in the parameter list:
 
     This option specifies the GraphViz2 object to use. This allows you to configure it as desired.
 
-    The default is GraphViz2->new. The default attributes are the same as in the synopsis, above,
-    except for the graph label of course.
+    The default is a GraphViz2 instance with a light canvas, Mrecord nodes, splines, and per-schema
+    border colors for qualified PostgreSQL table names (see ["create"](#create)).
 
     This key is optional.
 
@@ -77,6 +79,10 @@ Key-value pairs accepted in the parameter list:
 
 Creates the graph, which is accessible via the graph() method, or via the graph object you passed to
 new().
+
+Table names that look like `schema.table` (for example after PostgreSQL multi-schema merging) get a
+_border_ color per schema: one hue per distinct prefix, from a fixed bright palette that stays
+readable on the default light graph background.
 
 Returns $self to allow method chaining.
 
@@ -98,7 +104,10 @@ Parameters:
 
     If true, or if the environment variable `GRAPHVIZ2_DBI_DEBUG` is set, diagnostics are printed to
     `STDERR`: how many tables [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3ATableInfo) returned, current `search_path` on
-    PostgreSQL, and table names. Use this when the generated graph is empty or too small.
+    PostgreSQL, table names, and a `schema => #hex` border-color map. Trace lines
+    (`[GraphViz2::DBI] trace:`) show phases with elapsed seconds: per-schema `TableInfo` on PostgreSQL,
+    adding nodes and FK edges. Use this when the generated graph is empty, too small, or the run seems
+    to hang (often slow: many schemas, or `GraphViz2->run` / `dot` on a huge graph).
 
 Environment:
 
@@ -123,7 +132,7 @@ Returns `$self` for method chaining.
 
 Parameters:
 
-- `schemas => [ 'crm', 'gms', ... ]`
+- `schemas => [ 'crm', 'auth', ... ]`
 
     Optional arrayref of schema names. If present, an inheritance edge is drawn only if the parent
     table's schema or the child table's schema is in this list.
@@ -131,7 +140,11 @@ Parameters:
 - `graph => $graphviz2`
 
     Optional [GraphViz2](https://metacpan.org/pod/GraphViz2) instance. If omitted, a new graph is built with rank direction left-to-right,
-    dashed green edges, and boxed nodes (distinct from the default `graph()` styling).
+    transparent background, rounded nodes with transparent fill: each root gets a distinct palette
+    color; a table with one parent is colored one step lighter than the parent; with several parents,
+    border and font colors are the HSL blend of the parent colors (circular mean of hues, mean
+    saturation and lightness) then one step lighter. Each edge uses the parent table color. Edges have
+    no text label.
 
 Output (SVG, PNG, etc.) is produced by calling `$obj->inheritance_graph->run(...)` the same
 way as for the main schema graph; see [GraphViz2](https://metacpan.org/pod/GraphViz2).
@@ -179,8 +192,9 @@ It uses [DBIx::Admin::TableInfo](https://metacpan.org/pod/DBIx%3A%3AAdmin%3A%3AT
 
 ## How is table inheritance drawn?
 
-["create\_inheritance"](#create_inheritance) queries `pg_inherits` (PostgreSQL only) and adds edges labeled
-`inherits` from parent table to child table. Node names are `schema.table`.
+["create\_inheritance"](#create_inheritance) queries `pg_inherits` (PostgreSQL only) and adds directed edges from each
+parent table to child table (no edge label). Node names are `schema.table`. Colors follow the rules
+described in ["create\_inheritance"](#create_inheritance).
 
 ## Why is the schema graph empty or almost empty?
 
@@ -194,15 +208,18 @@ table names (`schema.table`). Set `GRAPHVIZ2_DBI_DEBUG` to print table counts an
 
 ## scripts/dbi.schema.pl
 
-If the environment vaiables DBI\_DSN, DBI\_USER and DBI\_PASS are set (the latter 2 are optional \[e.g. for SQLite\]),
-then this demonstrates building a graph from a database schema.
+Requires `DBI_DSN` (and optionally `DBI_USER`, `DBI_PASS`). Builds a _foreign-key_ graph by default
+(["create"](#create)), writing `./html/dbi.schema.svg` (or the format and path you pass as arguments).
 
-Also, for Postgres, you can set $ENV{DBI\_SCHEMA} to a comma-separated list of schemas, e.g. when processing the
-MusicBrainz database. See scripts/dbi.schema.pl.
+For PostgreSQL, set `DBI_SCHEMA` to a comma-separated list of schemas so metadata and merged table
+names match your database (see ["Why is the schema graph empty or almost empty"](#why-is-the-schema-graph-empty-or-almost-empty)).
 
-For details, see [http://blogs.perl.org/users/ron\_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html](http://blogs.perl.org/users/ron_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html).
+Run with `--inheritance` to build only the PostgreSQL _table inheritance_ diagram (["create\_inheritance"](#create_inheritance)),
+using `pg_inherits`. Default output is `./html/dbi.schema.inheritance.svg`. `--help` prints usage.
 
-Outputs to ./html/dbi.schema.svg by default.
+Set `GRAPHVIZ2_DBI_DEBUG` for stderr diagnostics and phase timings.
+
+For background, see [http://blogs.perl.org/users/ron\_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html](http://blogs.perl.org/users/ron_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html).
 
 ## scripts/sqlite.foreign.keys.pl
 

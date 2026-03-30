@@ -8,6 +8,7 @@ MANIFEST.SKIP
 README.md
 scripts/dbi.schema.pl
 scripts/sqlite.foreign.keys.pl
+t/helpers.t
 t/inheritance.t
 t/test.t
 xt/author/pod.t

@@ -4,11 +4,15 @@ use strict;
 use warnings;
 use warnings  qw(FATAL utf8); # Fatalize encoding glitches.
 
-our $VERSION = '2.54';
+our $VERSION = '2.55';
+
+# Localized in create() when debug is true so _trace runs without GRAPHVIZ2_DBI_DEBUG.
+our $_trace_for_create;
 
 use Carp qw(croak);
 use DBIx::Admin::TableInfo;
 use GraphViz2;
+use List::Util qw(max min);
 use Moo;
 use Time::HiRes qw(time);
 
@@ -69,12 +73,212 @@ has inheritance_graph => (
 
 sub _new_inheritance_graph {
 	my ($class) = @_;
+	# LR + blue + light canvas, in the spirit of GraphViz2 ISA graphs (see perl-graph-isa/generate_isa_graph.pl).
 	return GraphViz2->new(
-		edge   => {color => 'darkgreen', style => 'dashed'},
-		global => {directed => 1},
-		graph  => {rankdir => 'LR'},
-		node   => {color => 'darkblue', shape => 'box'},
+		global => {
+			directed              => 1,
+			combine_node_and_port => 0,
+		},
+		graph => {
+			rankdir   => 'LR',
+			bgcolor   => 'transparent',
+			splines   => 'true',
+			pad       => '0.55',
+			nodesep   => '0.42',
+			ranksep   => '0.88',
+			fontname  => 'Helvetica',
+			fontsize  => 11,
+			fontcolor => '#1e293b',
+			labelloc  => 't',
+			label     => 'Table inheritance (PostgreSQL INHERITS)',
+		},
+		node => {
+			shape     => 'box',
+			style     => 'rounded,filled',
+			fillcolor => 'transparent',
+			fontname  => 'Helvetica',
+			fontsize  => 9,
+		},
+		edge => {
+			color     => '#2563eb',
+			penwidth  => 0.95,
+			arrowsize => 0.72,
+			style     => 'solid',
+		},
 	);
+}
+
+# Saturated distinct hues per inheritance root (superclass); edges use tail (parent) color.
+my @INHERITANCE_ROOT_PALETTE = (
+	'#b91c1c', '#2563eb', '#15803d', '#c2410c', '#7c3aed',
+	'#db2777', '#0d9488', '#ca8a04', '#4f46e5', '#e11d48',
+	'#0284c7', '#65a30d', '#c026d3', '#ea580c', '#6366f1',
+	'#dc2626', '#0891b2', '#a855f7', '#059669', '#d946ef',
+);
+
+use constant _INHERIT_LIGHTEN_L => 0.09;
+
+sub _hex_to_rgb1 {
+	my ($hex) = @_;
+	return unless defined $hex && $hex =~ /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
+	return ( hex($1) / 255, hex($2) / 255, hex($3) / 255 );
+}
+
+sub _rgb1_to_hex {
+	my ( $r, $g, $b ) = @_;
+	$r = min( 1, max( 0, $r ) );
+	$g = min( 1, max( 0, $g ) );
+	$b = min( 1, max( 0, $b ) );
+	return sprintf '#%02x%02x%02x', map { int( $_ * 255 + 0.5 ) } ( $r, $g, $b );
+}
+
+sub _rgb_to_hsl {
+	my ( $r, $g, $b ) = @_;
+	my $mx = max( $r, $g, $b );
+	my $mn = min( $r, $g, $b );
+	my $L  = ( $mx + $mn ) / 2;
+	if ( $mx == $mn ) {
+		return ( 0, 0, $L );
+	}
+	my $d = $mx - $mn;
+	my $S = $L > 0.5 ? $d / ( 2 - $mx - $mn ) : $d / ( $mx + $mn );
+	my $H;
+	if ( $mx == $r ) {
+		$H = ( ( $g - $b ) / $d + ( $g < $b ? 6 : 0 ) ) / 6;
+	}
+	elsif ( $mx == $g ) {
+		$H = ( ( $b - $r ) / $d + 2 ) / 6;
+	}
+	else {
+		$H = ( ( $r - $g ) / $d + 4 ) / 6;
+	}
+	return ( $H * 360, $S, $L );
+}
+
+sub _hue_to_rgb_ch {
+	my ( $p, $q, $t ) = @_;
+	$t += 1 if $t < 0;
+	$t -= 1 if $t > 1;
+	return $p + ( $q - $p ) * 6 * $t         if $t < 1 / 6;
+	return $q                                if $t < 1 / 2;
+	return $p + ( $q - $p ) * ( 2 / 3 - $t ) * 6 if $t < 2 / 3;
+	return $p;
+}
+
+sub _hsl_to_rgb1 {
+	my ( $h, $s, $l ) = @_;
+	$h = ( ( $h % 360 ) + 360 ) % 360;
+	$h /= 360;
+	if ( $s == 0 ) {
+		return ( $l, $l, $l );
+	}
+	my $q = $l < 0.5 ? $l * ( 1 + $s ) : $l + $s - $l * $s;
+	my $p = 2 * $l - $q;
+	return (
+		_hue_to_rgb_ch( $p, $q, $h + 1 / 3 ),
+		_hue_to_rgb_ch( $p, $q, $h ),
+		_hue_to_rgb_ch( $p, $q, $h - 1 / 3 ),
+	);
+}
+
+sub _inheritance_lighten_hex {
+	my ( $hex, $delta_l ) = @_;
+	$delta_l = _INHERIT_LIGHTEN_L() if !defined $delta_l;
+	my @rgb = _hex_to_rgb1($hex);
+	return $hex unless @rgb == 3;
+	my ( $H, $S, $L ) = _rgb_to_hsl(@rgb);
+	$L = min( 0.985, $L + $delta_l );
+	@rgb = _hsl_to_rgb1( $H, $S, $L );
+	return _rgb1_to_hex(@rgb);
+}
+
+# Circular mean for hue; arithmetic mean for S and L — analogous to mixing pigments / perceptual mix.
+sub _inheritance_blend_hex {
+	my (@hexes) = @_;
+	my @hsl;
+	for my $hx (@hexes) {
+		my @rgb = _hex_to_rgb1($hx);
+		next unless @rgb == 3;
+		push @hsl, [ _rgb_to_hsl(@rgb) ];
+	}
+	return $hexes[0] if @hsl < 1;
+	return _inheritance_lighten_hex( $hexes[0], 0 ) if @hsl < 2;
+	my $sx = 0;
+	my $sy = 0;
+	my $Ssum = 0;
+	my $Lsum = 0;
+	my $n = 0;
+	for my $t (@hsl) {
+		my ( $H, $S, $L ) = @$t;
+		my $rad = $H * 3.1415926535897931 / 180;
+		$sx += cos($rad);
+		$sy += sin($rad);
+		$Ssum += $S;
+		$Lsum += $L;
+		$n++;
+	}
+	my $Hmean = atan2( $sy, $sx ) * 180 / 3.1415926535897931;
+	$Hmean += 360 if $Hmean < 0;
+	my $Smean = $Ssum / $n;
+	my $Lmean = $Lsum / $n;
+	my @rgb = _hsl_to_rgb1( $Hmean, $Smean, $Lmean );
+	return _rgb1_to_hex(@rgb);
+}
+
+sub _inheritance_depth {
+	my ( $parents_of, $all_nodes ) = @_;
+	my %depth;
+	my %vis;
+	my $go;
+	$go = sub {
+		my ($n) = @_;
+		return $depth{$n} if exists $depth{$n};
+		croak "GraphViz2::DBI: cycle in pg_inherits near $n" if $vis{$n};
+		$vis{$n} = 1;
+		my $pars = $parents_of->{$n};
+		my $d = ( !$pars || !@$pars ) ? 0 : ( max( map { $go->($_) } @$pars ) + 1 );
+		delete $vis{$n};
+		return $depth{$n} = $d;
+	};
+	$go->($_) for keys %$all_nodes;
+	return \%depth;
+}
+
+# Roots: palette. One parent: parent color + one tone lighter. Several parents: blend(parents) + one tone lighter.
+sub _inheritance_node_and_edge_colors {
+	my ( $parents_of, $all_nodes, $edges ) = @_;
+	my %is_child;
+	$is_child{ $_->[1] } = 1 for @$edges;
+	my @roots = sort grep { !$is_child{$_} } keys %$all_nodes;
+
+	my %root_hex;
+	my $i = 0;
+	for my $r (@roots) {
+		$root_hex{$r} = $INHERITANCE_ROOT_PALETTE[ $i % @INHERITANCE_ROOT_PALETTE ];
+		$i++;
+	}
+
+	my $depth = _inheritance_depth( $parents_of, $all_nodes );
+	my @order = sort { $depth->{$a} <=> $depth->{$b} || $a cmp $b } keys %$all_nodes;
+
+	my %node_border;
+	for my $n (@order) {
+		my $pars = $parents_of->{$n};
+		if ( !$pars || !@$pars ) {
+			$node_border{$n} = $root_hex{$n};
+		}
+		elsif ( @$pars == 1 ) {
+			my $ph = $node_border{ $pars->[0] };
+			$node_border{$n} = _inheritance_lighten_hex($ph);
+		}
+		else {
+			my @cols = map { $node_border{$_} } @$pars;
+			my $mix = _inheritance_blend_hex(@cols);
+			$node_border{$n} = _inheritance_lighten_hex($mix);
+		}
+	}
+
+	return \%node_border;
 }
 
 # DBIx::Admin::TableInfo hardcodes schema => 'public' for PostgreSQL (see its dbh2schema()),
@@ -91,8 +295,36 @@ sub _pg_qualify_table_name {
 	return defined $s ? qq{$s.$table} : $table;
 }
 
+# Qualified node names schema.table: one saturated border color per schema (readable on #f0f4f8).
+sub _schema_prefix_from_table_name {
+	my ($name) = @_;
+	return '_default' if !defined $name || $name eq '';
+	my $dot = index( $name, '.' );
+	return $dot < 0 ? '_default' : substr( $name, 0, $dot );
+}
+
+sub _schema_border_color_map {
+	my ($table_names) = @_;
+	my %uniq;
+	$uniq{ _schema_prefix_from_table_name($_) } = 1 for @$table_names;
+	my @schemas = sort keys %uniq;
+	my @palette = (
+		'#e11d48', '#2563eb', '#16a34a', '#d97706', '#9333ea',
+		'#db2777', '#0d9488', '#ea580c', '#4f46e5', '#ca8a04',
+		'#dc2626', '#0284c7', '#65a30d', '#c026d3', '#059669',
+		'#be185d', '#1d4ed8', '#15803d', '#a855f7', '#c2410c',
+	);
+	my %map;
+	my $i = 0;
+	for my $s (@schemas) {
+		$map{$s} = $palette[ $i % @palette ];
+		$i++;
+	}
+	return \%map;
+}
+
 sub _trace {
-	return unless $ENV{GRAPHVIZ2_DBI_DEBUG};
+	return unless $ENV{GRAPHVIZ2_DBI_DEBUG} || $_trace_for_create;
 	my ( $msg, $t0 ) = @_;
 	if ( defined $t0 ) {
 		warn sprintf "[GraphViz2::DBI] trace: $msg (%.2fs)\n", time - $t0;
@@ -105,7 +337,8 @@ sub _trace {
 sub _merged_table_info {
 	my ($self) = @_;
 	my $dbh = $self->dbh;
-	my $t_all = $ENV{GRAPHVIZ2_DBI_DEBUG} ? time : undef;
+	my $t_all =
+		( $ENV{GRAPHVIZ2_DBI_DEBUG} || $_trace_for_create ) ? time : undef;
 
 	if ( ( $dbh->{Driver}{Name} || '' ) ne 'Pg' ) {
 		_trace('TableInfo: single pass (non-Pg)');
@@ -126,7 +359,8 @@ sub _merged_table_info {
 	_trace( 'TableInfo (Pg): merging ' . scalar(@schemas) . ' schema(s) (slow: metadata + FK probes per schema)' );
 	my %merged;
 	for my $sch (@schemas) {
-		my $t_s = $ENV{GRAPHVIZ2_DBI_DEBUG} ? time : undef;
+		my $t_s =
+			( $ENV{GRAPHVIZ2_DBI_DEBUG} || $_trace_for_create ) ? time : undef;
 		_trace("TableInfo (Pg): schema=$sch ...");
 		my $info = DBIx::Admin::TableInfo->new( dbh => $dbh, schema => $sch )->info;
 		_trace( 'TableInfo (Pg): schema=' . $sch . ' done (' . ( scalar keys %$info ) . ' tables)', $t_s )
@@ -160,6 +394,7 @@ sub _merged_table_info {
 sub create {
 	my ($self, %arg) = @_;
 	my $debug = $arg{debug} || $ENV{GRAPHVIZ2_DBI_DEBUG};
+	local $_trace_for_create = $debug;
 	my $t_create = $debug ? time : undef;
 	my $start_info = $self->_merged_table_info;
 	_trace( 'create(): metadata ready', $t_create ) if $debug && defined $t_create;
@@ -190,18 +425,30 @@ sub create {
 	}
 	my $t_nodes = $debug ? time : undef;
 	_trace( 'create(): adding nodes to Graphviz graph (' . ( scalar keys %info ) . ' tables)' ) if $debug;
+	my @sorted_tables = sort keys %info;
+	my $border_for = _schema_border_color_map( \@sorted_tables );
+	if ($debug) {
+		warn "[GraphViz2::DBI] debug: schema border colors: ",
+			join( q{, }, map { qq{$_ => $border_for->{$_}} } sort keys %$border_for ), "\n";
+	}
 	my %port;
-	for my $table_name (sort keys %info) {
+	for my $table_name (@sorted_tables) {
 		my $port = 0;
 		my %thisport = map +($_ => ++$port),
 			sort map{s/^"(.+)"$/$1/; $_} keys %{$info{$table_name}{columns} };
-		$self->graph->add_node(name => $table_name, label => [
-			{port => 'port0', text => $table_name},
-			[ map +{
-				port => "port$thisport{$_}",
-				text => "$thisport{$_}: $_",
-			}, sort keys %thisport ],
-		]);
+		my $sk = _schema_prefix_from_table_name($table_name);
+		$self->graph->add_node(
+			name     => $table_name,
+			color    => $border_for->{$sk},
+			penwidth => 1.35,
+			label    => [
+				{port => 'port0', text => $table_name},
+				[ map +{
+					port => "port$thisport{$_}",
+					text => "$thisport{$_}: $_",
+				}, sort keys %thisport ],
+			],
+		);
 		$port{$table_name} = \%thisport;
 	}
 	_trace( 'create(): nodes added', $t_nodes ) if $debug && defined $t_nodes;
@@ -291,7 +538,7 @@ sub create_inheritance {
 	my $sth = $dbh->prepare($sql) or croak $dbh->errstr;
 	$sth->execute() or croak $sth->errstr;
 
-	my %seen_node;
+	my @edges;
 	while ( my $r = $sth->fetchrow_hashref ) {
 		if (%schema_ok) {
 			next
@@ -300,17 +547,43 @@ sub create_inheritance {
 		}
 		my $parent = qq{$r->{parent_nsp}.$r->{parent_tbl}};
 		my $child  = qq{$r->{child_nsp}.$r->{child_tbl}};
-		for my $n ( $parent, $child ) {
-			next if $seen_node{$n}++;
-			$g->add_node( name => $n, label => $n );
-		}
+		push @edges, [ $parent, $child ];
+	}
+	$sth->finish;
+
+	my ( %parents_of, %all_nodes );
+	for my $e (@edges) {
+		my ( $p, $c ) = @$e;
+		$all_nodes{$p} = 1;
+		$all_nodes{$c} = 1;
+		push @{ $parents_of{$c} }, $p;
+	}
+
+	my $node_border = _inheritance_node_and_edge_colors(
+		\%parents_of, \%all_nodes, \@edges );
+
+	for my $name ( sort keys %$node_border ) {
+		my $b = $node_border->{$name};
+		$g->add_node(
+			name       => $name,
+			label      => $name,
+			color      => $b,
+			fontcolor  => $b,
+			fillcolor  => 'transparent',
+			penwidth   => 1.25,
+		);
+	}
+
+	for my $e (@edges) {
+		my ( $parent, $child ) = @$e;
+		my $ec = $node_border->{$parent};
 		$g->add_edge(
 			from  => $parent,
 			to    => $child,
-			label => 'inherits',
+			color => $ec,
 		);
 	}
-	$sth->finish;
+
 	return $self;
 }
 
@@ -321,6 +594,12 @@ sub create_inheritance {
 =head1 NAME
 
 L<GraphViz2::DBI> - Visualize a database schema as a graph
+
+=head1 VERSION
+
+This document describes version 2.55 of L<GraphViz2::DBI>. The canonical version is the value of
+C<$GraphViz2::DBI::VERSION> in F<lib/GraphViz2/DBI.pm> and the F<Changes> file shipped with this
+distribution.
 
 =head1 Synopsis
 
@@ -382,8 +661,8 @@ This key is mandatory.
 
 This option specifies the GraphViz2 object to use. This allows you to configure it as desired.
 
-The default is GraphViz2->new. The default attributes are the same as in the synopsis, above,
-except for the graph label of course.
+The default is a GraphViz2 instance with a light canvas, Mrecord nodes, splines, and per-schema
+border colors for qualified PostgreSQL table names (see L</create>).
 
 This key is optional.
 
@@ -395,6 +674,10 @@ This key is optional.
 
 Creates the graph, which is accessible via the graph() method, or via the graph object you passed to
 new().
+
+Table names that look like C<schema.table> (for example after PostgreSQL multi-schema merging) get a
+I<border> color per schema: one hue per distinct prefix, from a fixed bright palette that stays
+readable on the default light graph background.
 
 Returns $self to allow method chaining.
 
@@ -418,10 +701,10 @@ If none are listed for inclusion, I<all> tables are included.
 
 If true, or if the environment variable C<GRAPHVIZ2_DBI_DEBUG> is set, diagnostics are printed to
 C<STDERR>: how many tables L<DBIx::Admin::TableInfo> returned, current C<search_path> on
-PostgreSQL, and table names. Trace lines (C<[GraphViz2::DBI] trace:>) show phases with elapsed
-seconds: per-schema C<TableInfo> on PostgreSQL, adding nodes and FK edges. Use this when the
-generated graph is empty, too small, or the run seems to hang (often slow: many schemas, or
-C<GraphViz2-E<gt>run> / C<dot> on a huge graph).
+PostgreSQL, table names, and a C<schema =E<gt> #hex> border-color map. Trace lines
+(C<[GraphViz2::DBI] trace:>) show phases with elapsed seconds: per-schema C<TableInfo> on PostgreSQL,
+adding nodes and FK edges. Use this when the generated graph is empty, too small, or the run seems
+to hang (often slow: many schemas, or C<GraphViz2-E<gt>run> / C<dot> on a huge graph).
 
 =back
 
@@ -454,7 +737,7 @@ Parameters:
 
 =over 4
 
-=item C<schemas =E<gt> [ 'crm', 'gms', ... ]>
+=item C<schemas =E<gt> [ 'crm', 'auth', ... ]>
 
 Optional arrayref of schema names. If present, an inheritance edge is drawn only if the parent
 table's schema or the child table's schema is in this list.
@@ -462,7 +745,11 @@ table's schema or the child table's schema is in this list.
 =item C<graph =E<gt> $graphviz2>
 
 Optional L<GraphViz2> instance. If omitted, a new graph is built with rank direction left-to-right,
-dashed green edges, and boxed nodes (distinct from the default C<graph()> styling).
+transparent background, rounded nodes with transparent fill: each root gets a distinct palette
+color; a table with one parent is colored one step lighter than the parent; with several parents,
+border and font colors are the HSL blend of the parent colors (circular mean of hues, mean
+saturation and lightness) then one step lighter. Each edge uses the parent table color. Edges have
+no text label.
 
 =back
 
@@ -516,8 +803,9 @@ It uses L<DBIx::Admin::TableInfo>.
 
 =head2 How is table inheritance drawn?
 
-L</create_inheritance> queries C<pg_inherits> (PostgreSQL only) and adds edges labeled
-C<inherits> from parent table to child table. Node names are C<schema.table>.
+L</create_inheritance> queries C<pg_inherits> (PostgreSQL only) and adds directed edges from each
+parent table to child table (no edge label). Node names are C<schema.table>. Colors follow the rules
+described in L</create_inheritance>.
 
 =head2 Why is the schema graph empty or almost empty?
 
@@ -531,15 +819,18 @@ C<search_path>.
 
 =head2 scripts/dbi.schema.pl
 
-If the environment vaiables DBI_DSN, DBI_USER and DBI_PASS are set (the latter 2 are optional [e.g. for SQLite]),
-then this demonstrates building a graph from a database schema.
+Requires C<DBI_DSN> (and optionally C<DBI_USER>, C<DBI_PASS>). Builds a I<foreign-key> graph by default
+(L</create>), writing C<./html/dbi.schema.svg> (or the format and path you pass as arguments).
 
-Also, for Postgres, you can set $ENV{DBI_SCHEMA} to a comma-separated list of schemas, e.g. when processing the
-MusicBrainz database. See scripts/dbi.schema.pl.
+For PostgreSQL, set C<DBI_SCHEMA> to a comma-separated list of schemas so metadata and merged table
+names match your database (see L</Why is the schema graph empty or almost empty>).
 
-For details, see L<http://blogs.perl.org/users/ron_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html>.
+Run with C<--inheritance> to build only the PostgreSQL I<table inheritance> diagram (L</create_inheritance>),
+using C<pg_inherits>. Default output is C<./html/dbi.schema.inheritance.svg>. C<--help> prints usage.
 
-Outputs to ./html/dbi.schema.svg by default.
+Set C<GRAPHVIZ2_DBI_DEBUG> for stderr diagnostics and phase timings.
+
+For background, see L<http://blogs.perl.org/users/ron_savage/2013/03/graphviz2-and-the-dread-musicbrainz-db.html>.
 
 =head2 scripts/sqlite.foreign.keys.pl
 

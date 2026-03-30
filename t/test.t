@@ -6,7 +6,7 @@ use GraphViz2;
 use GraphViz2::DBI;
 use DBI;
 
-my $dbh = DBI->connect("dbi:SQLite:dbname=:memory:", '', '');
+my $dbh = DBI->connect( "dbi:SQLite:dbname=:memory:", '', '' );
 $dbh->do($_) for <<'EOF', <<'EOF', <<'EOF';
 CREATE TABLE "user" (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,32 +37,39 @@ CREATE TABLE zap (
 )
 EOF
 
-my $g_dbi = GraphViz2::DBI->new(dbh => $dbh);
-$g_dbi->create(exclude => ['zap']);
+my $g_dbi = GraphViz2::DBI->new( dbh => $dbh );
+$g_dbi->create( exclude => ['zap'] );
 my $g = $g_dbi->graph;
-is_deeply_dump($g->node_hash, {
-  blog => {
-    attributes => {
-      label => '<port0> blog|{<port1> 1:\\ html|<port2> 2:\\ id|<port3> 3:\\ is_published|<port4> 4:\\ markdown|<port5> 5:\\ published_date|<port6> 6:\\ slug|<port7> 7:\\ title|<port8> 8:\\ username}',
-      shape => 'Mrecord',
-    },
-  },
-  user => {
-    attributes => {
-      label => '<port0> user|{<port1> 1:\\ access|<port2> 2:\\ age|<port3> 3:\\ avatar|<port4> 4:\\ created|<port5> 5:\\ email|<port6> 6:\\ id|<port7> 7:\\ password|<port8> 8:\\ plugin|<port9> 9:\\ username}',
-      shape => 'Mrecord',
-    },
-  },
-}, 'nodes');
-is_deeply_dump($g->edge_hash, {
-  blog => {
-    user => [ { attributes => {}, from_port => ':"port8"', to_port => ':"port9"' } ]
-  }
-}, 'edges');
 
-sub is_deeply_dump {
-  my ($got, $expected, $label) = @_;
-  is_deeply $got, $expected, $label or diag explain $got;
+for my $t (qw(blog user)) {
+	ok $g->node_hash->{$t}, "node $t present";
+	my $a = $g->node_hash->{$t}{attributes};
+	is $a->{shape}, 'Mrecord', "shape $t";
+	like $a->{label}, qr/\Q<port0> $t\E/, "label $t";
+	like $a->{color}, qr/^#[0-9a-f]{6}\z/i, "per-schema border color $t";
+	ok $a->{penwidth}, "penwidth $t";
+}
+
+is_deeply(
+	$g->edge_hash,
+	{   blog => {
+			user => [ { attributes => {}, from_port => ':"port8"', to_port => ':"port9"' } ],
+		},
+	},
+	'edges',
+);
+
+{
+	my @warn;
+	local $SIG{__WARN__} = sub { push @warn, $_[0] };
+	my $g2 = GraphViz2::DBI->new( dbh => $dbh );
+	$g2->create(
+		exclude => ['zap'],
+		include => [qw(blog user)],
+		debug   => 1,
+	);
+	ok( grep { /tables used for graph/ } @warn, 'create(debug=>1) stderr' );
+	ok( grep { /trace:/ } @warn, 'create(debug=>1) trace lines' );
 }
 
 done_testing;

@@ -1,8 +1,30 @@
+2.55 2026-03-31
+- PostgreSQL FK graph: merge DBIx::Admin::TableInfo per schema when DBI_SCHEMA is set (TableInfo
+  alone only queries public); qualified schema.table node names and FK endpoints
+- create(): per-schema border and font colors for qualified names; saturated palette; GRAPHVIZ2_DBI_DEBUG
+  lists schema => #hex and trace timings (TableInfo per schema, nodes, FK edges); create(debug=>1) now
+  enables the same [GraphViz2::DBI] trace: lines as the env var (previously only debug: lines ran)
+- create(): FK edges referencing id use headport [port0,w] (fixes GraphViz2 encoding : in port names)
+- Default GraphViz2 theme for FK graph: light background, Mrecord nodes, splines; scripts/dbi.schema.pl
+  matches
+- scripts/dbi.schema.pl: fix DBI_SCHEMA / SET search_path; exit on failed DBI connect; FindBin lib;
+  --inheritance for PostgreSQL INHERITS graph (default html/dbi.schema.inheritance.<fmt>); --help;
+  optional GRAPHVIZ2_DBI_DEBUG tracing
+- create_inheritance() (PostgreSQL): reads pg_inherits; transparent canvas; nodes use border + font
+  only (transparent fill); distinct palette per root; one parent => one HSL lighten step; multiple
+  parents => HSL blend (circular hue mean) then one lighten step; edge color = parent node color;
+  no edge text label
+- Tests: t/test.t updated for schema-colored nodes; t/inheritance.t for inheritance graph and
+  multi-parent coloring; t/helpers.t exercises private color/pg/trace helpers for coverage
+
 2.54 2026-03-31
-- create(): FK edges to id column use headport [port0,w] not "port0:w" (fixes GraphViz2 encoding : as %3a and dot warnings)
+- create(): FK edges to id column use headport [port0,w] not "port0:w" (fixes GraphViz2 encoding : as %3a and dot
+warnings)
 - default GraphViz2 theme: light background, Mrecord-filled nodes, splines, spacing; scripts/dbi.schema.pl matches
-- GRAPHVIZ2_DBI_DEBUG: trace phases (TableInfo per schema, nodes, FK edges, timings); scripts/dbi.schema.pl traces connect, create, Graphviz run; prepend use lib for local GraphViz2::DBI
-- PostgreSQL: merge DBIx::Admin::TableInfo per schema when DBI_SCHEMA is set (TableInfo alone only queries public, ignoring search_path); qualify FK endpoints as schema.table
+- GRAPHVIZ2_DBI_DEBUG: trace phases (TableInfo per schema, nodes, FK edges, timings); scripts/dbi.schema.pl traces
+connect, create, Graphviz run; prepend use lib for local GraphViz2::DBI
+- PostgreSQL: merge DBIx::Admin::TableInfo per schema when DBI_SCHEMA is set (TableInfo alone only queries public,
+ignoring search_path); qualify FK endpoints as schema.table
 - fix scripts/dbi.schema.pl: DBI_SCHEMA was broken (Perl && returned 1, not schema list), breaking SET search_path
 - add GRAPHVIZ2_DBI_DEBUG and create(debug => 1) diagnostics for empty/small graphs
 
